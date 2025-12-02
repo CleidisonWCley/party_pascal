@@ -1,63 +1,55 @@
 #--------------------------------------------------------------------
-# INICIALIZAÇÃO DO JOGO - ADAPTADO PARA WEB (PYGBAG) & ESCALA
+# INICIALIZAÇÃO DO JOGO - ADAPTADO PARA WEB (PYGBAG)
 #--------------------------------------------------------------------
-import asyncio  # 1. IMPORT OBRIGATÓRIO PARA WEB
+import asyncio  # <--- 1. IMPORT OBRIGATÓRIO PARA WEB
 import pygame
 import sys
 import os
 
-# Adiciona o diretório base ao path (Boa prática)
+# Adiciona o diretório base ao path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# --- IMPORTS DO SEU JOGO ---
 from src.core import main_menu
-from src.audio_manager import audio_manager
-from src.display_manager import display_manager  # <--- O NOVO GERENTE
+from src.performance import is_mobile_like
 
-# 2. A FUNÇÃO PRINCIPAL (ASYNC)
+# 2. A FUNÇÃO PRINCIPAL AGORA É 'ASYNC'
 async def main():
-    # Inicializa Pygame
+    # Inicializa o Pygame
     pygame.init()
     
-    # Inicializa o Audio Manager (Se tiver o método init)
-    try:
-        audio_manager.init_mixer()
-    except:
-        pass
-
-    # ------------------------------------------------------------------
-    # 3. INICIALIZAÇÃO DA TELA (MUDANÇA CRÍTICA)
-    # ------------------------------------------------------------------
-    # Em vez de vários ifs (web/mobile/pc), deixamos o display_manager
-    # criar a janela ideal e nos dar uma "tela virtual" de 1280x720.
-    # ------------------------------------------------------------------
+    # Detecta o ambiente
+    # Dica: No Pygbag (Web), o sistema muitas vezes é identificado como 'emscripten'
+    mobile_mode = is_mobile_like()
     
-    # Detecta se é web para ajuste fino se necessário, mas o manager cuida do grosso
+    # Ajuste para Web: Se for Pygbag, forçamos um tamanho ou deixamos resizable
     if sys.platform == "emscripten":
+        # Na web, geralmente deixamos a janela se ajustar ou definimos um fixo
+        screen = pygame.display.set_mode((1280, 720)) 
         print("🌐 Modo Web (Pygbag) Detectado")
-    
-    # Esta função cria a janela real e retorna a superfície virtual (1280x720)
-    # O jogo vai desenhar tudo nessa 'virtual_screen'
-    # Se for mobile/web, o fullscreen=True (ou auto-detecção no manager) cuida do resto
-    is_fullscreen = sys.platform == "emscripten" or sys.platform.startswith("android")
-    virtual_screen = display_manager.init_screen(1280, 720, fullscreen=is_fullscreen)
-    
-    pygame.display.set_caption("Party Pascal - Mobile/PC Edition")
+    elif mobile_mode:
+        # --- MODO MOBILE NATIVO (APK) ---
+        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        pygame.mouse.set_visible(False)
+        print(f"📱 Modo Mobile Detectado: Resolução {screen.get_size()}")
+    else:
+        # --- MODO PC ---
+        default_size = (1024, 600)
+        screen = pygame.display.set_mode(default_size, pygame.RESIZABLE)
+        print(f"💻 Modo PC Detectado: Janela {default_size}")
 
     # ------------------------------------------------------------------
-    # 4. CHAMADA DO MENU
-    # Passamos a 'virtual_screen' para o menu desenhar nela.
+    # 3. CHAMADA DO MENU (O PONTO CRÍTICO)
+    # Como o main_menu provavelmente tem um loop (while), ele também
+    # precisa ser async ou você precisa garantir que o loop dele tenha
+    # o await asyncio.sleep(0).
     # ------------------------------------------------------------------
     
-    # O loop do jogo precisa ser async para web.
-    # Se main_menu for uma função async, usamos await.
-    try:
-        await main_menu(virtual_screen)
-    except TypeError:
-        # Se main_menu não for async, chamamos normal (mas o ideal é ser async)
-        print("Aviso: main_menu não é assíncrono. Pode travar na Web se não tiver asyncio.sleep(0).")
-        main_menu(virtual_screen)
+    # Se você alterou o main_menu para ser 'async def main_menu...', use:
+    await main_menu(screen)
+    
+    # Se o main_menu NÃO for async, o jogo vai rodar, mas pode travar
+    # se não houver o asyncio.sleep(0) lá dentro.
 
 if __name__ == "__main__":
-    # 5. EXECUÇÃO COM ASYNCIO
+    # 4. EXECUÇÃO COM ASYNCIO
     asyncio.run(main())
