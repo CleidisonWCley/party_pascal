@@ -65,7 +65,6 @@ class _AudioManager:
         }
 
         self.sfx_table = {
-            "click": "clique.ogg",
             "correto": "correto.wav",
             "errado": "errado.wav",
             "explosion": "explosion.wav",
