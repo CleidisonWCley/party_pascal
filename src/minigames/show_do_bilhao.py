@@ -435,9 +435,9 @@ async def run_show_do_bilhao(screen):
         
         # 2. Botões
         current_buttons = []
-        btn_start_y = current_container_rect.bottom + 30
-        btn_h = min(80, int(h * 0.10))
-        btn_spacing = 15
+        btn_start_y = current_container_rect.bottom + int(H * 0.03)
+        btn_h = max(50, int(h * 0.10))
+        btn_spacing = max(10, int(H * 0.02))
         btn_w = w * 0.7
         btn_x = (w - btn_w) // 2
         
