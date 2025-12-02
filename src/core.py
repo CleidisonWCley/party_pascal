@@ -17,6 +17,7 @@ from src.utils import load_font
 from src.cutscene_intro import run_cutscene_intro
 from src.settings_menu import run_settings_menu
 from src.audio_manager import audio_manager
+from src.display_manager import display_manager  # <--- IMPORT NOVO
 
 # --------------------------------------------------
 # Config / paths
@@ -47,12 +48,9 @@ class MenuParticle:
     
     def __init__(self, w, h):
         self.w = max(1, w)
-        # Gera propriedades iniciais
         self.r = random.uniform(2, 4)
         alpha = random.randint(40, 130)
         
-        # --- OTIMIZAÇÃO DE PERFORMANCE ---
-        # Criamos a Surface UMA VEZ aqui
         self.image = pygame.Surface((int(self.r*2), int(self.r*2)), pygame.SRCALPHA)
         pygame.draw.circle(self.image, (255, 255, 255, alpha), (int(self.r), int(self.r)), int(self.r))
         
@@ -92,11 +90,12 @@ class Button:
             try:
                 img = pygame.image.load(icon_path).convert_alpha()
                 img = pygame.transform.smoothscale(img, (44, 44))
+                # Cria ícone branco
                 white = pygame.Surface(img.get_size(), pygame.SRCALPHA)
-                for x in range(img.get_width()):
-                    for y in range(img.get_height()):
-                        r,g,b,a = img.get_at((x,y))
-                        white.set_at((x,y), (255,255,255,a))
+                # Blit com flag especial para preencher de branco mantendo alpha
+                white.fill((255, 255, 255))
+                img_rect = img.get_rect()
+                white.blit(img, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
                 self.icon = white
             except Exception:
                 self.icon = None
@@ -152,9 +151,11 @@ class Button:
 
         screen.blit(self.text_surf, text_rect)
 
-    def try_click(self, event):
+    # --- ATUALIZADO: Recebe a posição corrigida do mouse ---
+    def try_click(self, event, corrected_mouse_pos):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.rect.collidepoint(event.pos):
+            # Verifica colisão com a posição do mouse já ajustada pelo display_manager
+            if self.rect.collidepoint(corrected_mouse_pos):
                 audio_manager.play_sfx_if_exists("click")
                 return True
         return False
@@ -196,6 +197,8 @@ def load_assets(screen, background_path, logo_path):
 # Main menu (ASYNC / WEB VERSION)
 # --------------------------------------------------
 async def main_menu(screen):
+    # 'screen' aqui é a superfície virtual (1280x720) vinda do main.py
+    
     settings = load_settings()
 
     background_path = os.path.join(BASE_DIR, "assets", "background", "background_main.png")
@@ -227,22 +230,23 @@ async def main_menu(screen):
                    icon_path=os.path.join(icons_dir, f"{icon}.png"))
         buttons.append(b)
 
-    last_size = screen.get_size()
+    # Variáveis de controle
     needs_recalc = False
-
     clock = pygame.time.Clock()
     fading = True
     fade_alpha = 255
 
     while True:
-        # WEB TIP: Em alguns browsers, 60fps cravado pode conflitar.
-        # Mas asyncio.sleep(0) no final ajuda a equilibrar.
         dt = clock.tick(60)
 
-        mouse_pos = pygame.mouse.get_pos()
+        # --- 1. MOUSE CORRIGIDO ---
+        mouse_pos = display_manager.get_mouse_pos()
+        
+        # Como screen é virtual (fixo), W e H não mudam com o resize da janela real
         W, H = screen.get_size()
 
-        if (W, H) != last_size or needs_recalc:
+        # Recálculo só é necessário se voltarmos de uma tela que mudou algo ou forçado
+        if needs_recalc:
             font, background, logo = load_assets(screen, background_path, logo_path)
             cx = W // 2
             base_y = int(H * 0.58)
@@ -250,13 +254,11 @@ async def main_menu(screen):
             for i, b in enumerate(buttons):
                 b.update_layout((cx, base_y + i * spacing), font)
             particles = [MenuParticle(W, H) for _ in range(32)]
-            last_size = (W, H)
             needs_recalc = False
 
         # --- DRAW ---
         screen.blit(background, (0,0))
 
-        # Partículas agora são leves!
         for p in particles:
             p.update(dt, W, H)
             p.draw(screen)
@@ -282,41 +284,45 @@ async def main_menu(screen):
         # --- EVENTS ---
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                # Quit simples aqui, mas o botão tem a lógica web completa
                 pygame.quit(); sys.exit()
 
+            # --- 2. TRATAMENTO DE DISPLAY (RESIZE/FULLSCREEN) ---
+            if ev.type == pygame.VIDEORESIZE:
+                display_manager.resize(ev.w, ev.h)
+            
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     pygame.quit(); sys.exit()
                 if ev.key == pygame.K_F11:
-                    is_full = screen.get_flags() & pygame.FULLSCREEN
-                    if is_full:
-                        screen = pygame.display.set_mode((1024, 600), pygame.RESIZABLE)
-                    else:
-                        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                    display_manager.toggle_fullscreen()
+                    # A tela virtual não muda, mas podemos forçar recalc se desejado
                     needs_recalc = True
 
             for b in buttons:
-                if b.try_click(ev):
-                    pygame.display.flip()
+                # --- 3. CLICK COM MOUSE CORRIGIDO ---
+                # Passamos o evento E a posição corrigida
+                if b.try_click(ev, mouse_pos):
+                    # Força atualização visual imediata do clique
+                    display_manager.update()
                     
-                    # Pausa leve para feedback visual sem travar o browser
+                    # Pausa leve
                     await asyncio.sleep(0.3) 
 
                     # --- INICIAR JOGO ---
                     if b.text == "Iniciar Jogo":
+                        # Efeito visual de transição
                         f = pygame.Surface((W,H)); f.fill((0,0,0))
                         for a in range(0, 255, 20):
                             f.set_alpha(a)
                             screen.blit(f,(0,0))
-                            pygame.display.flip()
+                            display_manager.update() # Importante usar o manager
                             await asyncio.sleep(0.01)
 
                         audio_manager.fade_to_music("cutscene_intro", fade_ms=700)
                         
-                        # --- SEQUÊNCIA ASYNC ---
                         await run_cutscene_intro(screen)
 
+                        # Importação sob demanda para evitar ciclo
                         from src.game_modo import escolher_modo, run_minigame_selector
                         modo = await escolher_modo(screen)
 
@@ -333,25 +339,18 @@ async def main_menu(screen):
                         await run_settings_menu(screen)
                         needs_recalc = True
 
-                    # --- SAIR (WEB COMPATÍVEL - CORRIGIDO) ---
+                    # --- SAIR ---
                     elif b.text == "Sair":
                         if sys.platform == "emscripten":
-                            # WEB: Tenta usar a API correta do navegador
                             try:
-                                # Importação dinâmica para não quebrar no PC
                                 from platform import window
                                 window.location.href = "https://github.com/"
                             except Exception:
-                                # Fallback genérico se a importação falhar
-                                try:
-                                    platform.window.location.href = "https://github.com/"
-                                except:
-                                    pass
+                                pass
                         else:
-                            # PC: Fecha normal
                             pygame.quit(); sys.exit()
 
-        pygame.display.flip()
+        # --- 4. UPDATE FINAL ---
+        display_manager.update()
         
-        # OBRIGATÓRIO: Mantém o browser responsivo
         await asyncio.sleep(0)
